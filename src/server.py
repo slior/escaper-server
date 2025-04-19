@@ -6,19 +6,10 @@ import threading
 import time
 from playsound import playsound, PlaysoundException
 
-# --- Configuration Loading ---
-def load_config(config_path='config.json'):
-    """Loads configuration from a JSON file."""
-    try:
-        with open(config_path, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logging.error(f"Configuration file not found: {config_path}")
-        exit(1)
-    except json.JSONDecodeError:
-        logging.error(f"Error decoding JSON from configuration file: {config_path}")
-        exit(1)
+# --- Import Configuration Loading ---
+from src.config_loader import load_config
 
+# --- Configuration Loading ---
 CONFIG = load_config()
 
 # --- Logging Setup ---
