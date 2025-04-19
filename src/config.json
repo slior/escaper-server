@@ -1,0 +1,24 @@
+{
+  "mqtt_broker": {
+    "host": "localhost", 
+    "port": 1883
+  },
+  "audio_base_path": "/mnt/c/tmp/audio/",
+  "log_file": "../logs/server.log",
+  "station_configs": {
+    "station_5": { 
+      "beacon_proximity_1": {
+        "event_type": "beacon_proximity",
+        "range_threshold": 5,
+        "sound_on_trigger": "shalom.wav"
+      }
+    },
+    "station_door": {
+       "main_door_switch": {
+         "event_type": "door_status",
+         "trigger_value": "OPEN", 
+         "sound_on_trigger": "door_open_sound.wav"
+       }
+    }
+  }
+} 

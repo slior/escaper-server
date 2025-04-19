@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  mqtt_broker:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt_broker
+    ports:
+      - "1883:1883" # Default MQTT port
+      - "9001:9001" # Default MQTT over websockets port (optional)
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+      # Optional: Add configuration file if needed
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  escape_room_server:
+    build: ./src
+    container_name: escape_room_server
+    depends_on:
+      - mqtt_broker
+    volumes:
+      - ./src:/app # Map source code for development
+      - /mnt/c/tmp/audio:/app/audio # Map audio files from Windows path
+      - ./logs:/app/logs   # Map logs directory
+    environment:
+      - MQTT_BROKER_HOST=mqtt_broker # Use service name for hostname
+      - PYTHONUNBUFFERED=1 # Ensure python logs appear in docker logs
+    restart: unless-stopped
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
