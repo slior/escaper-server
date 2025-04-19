@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 
 def load_config(config_path='config.json'):
     """Loads configuration from a JSON file."""

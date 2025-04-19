@@ -4,55 +4,27 @@ import logging
 import os
 import threading
 import time
-from playsound import playsound, PlaysoundException
+
 
 # --- Import Configuration Loading ---
-from src.config_loader import load_config
+from config_loader import load_config
+# --- Import Logging Setup ---
+from logging_utils import setup_logging
+# --- Import Audio Utils ---
+from audio_utils import play_audio_threaded
 
 # --- Configuration Loading ---
 CONFIG = load_config()
 
 # --- Logging Setup ---
-LOG_FILE = CONFIG.get('log_file', '/app/logs/server.log')
-LOG_DIR = os.path.dirname(LOG_FILE)
-if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler() # Log to console as well
-    ]
-)
+# Define default log file path (used if not in config)
+DEFAULT_LOG_FILE = '/app/logs/server.log'
+LOG_FILE = CONFIG.get('log_file', DEFAULT_LOG_FILE)
+setup_logging(LOG_FILE)
 
 # --- State Management (In-Memory) ---
 SESSION_STATE = "PENDING" # Possible states: PENDING, RUNNING, STOPPED
 STATION_STATUS = {} # e.g., {"station_5": {"completed": false}, "station_door": {"completed": false}}
-
-# --- Audio Playback ---
-AUDIO_BASE_PATH = CONFIG.get('audio_base_path', '/app/audio/')
-
-def play_audio_threaded(sound_file_name):
-    """Plays an audio file in a separate thread."""
-    def target():
-        audio_path = os.path.join(AUDIO_BASE_PATH, sound_file_name)
-        if not os.path.exists(audio_path):
-            logging.error(f"Audio file not found: {audio_path}")
-            return
-        try:
-            logging.info(f"Playing sound: {audio_path}")
-            playsound(audio_path)
-            logging.info(f"Finished playing: {sound_file_name}")
-        except PlaysoundException as e:
-            logging.error(f"Error playing sound {audio_path}: {e}")
-        except Exception as e:
-            logging.error(f"An unexpected error occurred during audio playback {audio_path}: {e}")
-
-    thread = threading.Thread(target=target)
-    thread.daemon = True # Allow main program to exit even if thread is running
-    thread.start()
 
 # --- MQTT Callbacks ---
 def on_connect(client, userdata, flags, rc):
