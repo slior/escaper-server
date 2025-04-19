@@ -66,7 +66,13 @@ def on_message(client, userdata, msg):
 
     # --- Handle Control Messages ---
     if topic == "escaperoom/server/control/session":
-        SESSION_STATE, STATION_STATUS = handle_control_message(payload, SESSION_STATE, STATION_STATUS)
+        global CONFIG # Allow modification of the global CONFIG
+        new_session_state, new_station_status, reloaded_config = handle_control_message(payload, SESSION_STATE, STATION_STATUS)
+        SESSION_STATE = new_session_state
+        STATION_STATUS = new_station_status
+        if reloaded_config is not None:
+            CONFIG = reloaded_config # Update the global configuration
+            logging.info("Server configuration has been reloaded.")
         return # Stop processing after handling a control message
 
     # --- Handle Station Event Messages ---
