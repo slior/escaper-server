@@ -17,17 +17,33 @@ from station_handler import handle_station_event
 # --- Import Control Handler ---
 from control_handler import handle_control_message
 
+# --- Constants ---
+# Session States
+SESSION_STATE_PENDING = "PENDING"
+SESSION_STATE_RUNNING = "RUNNING"
+SESSION_STATE_STOPPED = "STOPPED"
+
+# MQTT Topics
+MQTT_TOPIC_STATION_EVENTS = "escaperoom/station/+/event/+"
+MQTT_TOPIC_SERVER_CONTROL = "escaperoom/server/control/session"
+
+# MQTT Configuration
+MQTT_CLIENT_ID_PREFIX = "escape-room-server-"
+MQTT_KEEPALIVE_SECONDS = 60
+
+# Other Constants
+MAIN_LOOP_SLEEP_SECONDS = 1
+DEFAULT_LOG_FILE = '/app/logs/server.log' # used if not in config
+
 # --- Configuration Loading ---
 CONFIG = load_config()
 
 # --- Logging Setup ---
-# Define default log file path (used if not in config)
-DEFAULT_LOG_FILE = '/app/logs/server.log'
 LOG_FILE = CONFIG.get('log_file', DEFAULT_LOG_FILE)
 setup_logging(LOG_FILE)
 
 # --- State Management (In-Memory) ---
-SESSION_STATE = "PENDING" # Possible states: PENDING, RUNNING, STOPPED
+SESSION_STATE = SESSION_STATE_PENDING # Initial state
 STATION_STATUS = {} # e.g., {"station_5": {"completed": false}, "station_door": {"completed": false}}
 
 # --- MQTT Callbacks ---
@@ -35,9 +51,9 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         logging.info("Connected to MQTT Broker!")
         # Subscribe to topics upon successful connection
-        client.subscribe("escaperoom/station/+/event/+")
-        client.subscribe("escaperoom/server/control/session")
-        logging.info("Subscribed to: escaperoom/station/+/event/+ and escaperoom/server/control/session")
+        client.subscribe(MQTT_TOPIC_STATION_EVENTS)
+        client.subscribe(MQTT_TOPIC_SERVER_CONTROL)
+        logging.info(f"Subscribed to: {MQTT_TOPIC_STATION_EVENTS} and {MQTT_TOPIC_SERVER_CONTROL}")
     else:
         logging.error(f"Failed to connect, return code {rc}")
 
@@ -47,48 +63,67 @@ def on_disconnect(client, userdata, rc):
         logging.info("Attempting to reconnect...")
         # Note: The Paho library handles reconnection attempts automatically.
 
-def on_message(client, userdata, msg):
-    global SESSION_STATE, STATION_STATUS
+def _parse_message_payload(msg):
+    """Attempts to decode and parse the message payload."""
     topic = msg.topic
     try:
         payload_str = msg.payload.decode("utf-8")
         logging.info(f"Received message: {topic} - {payload_str}")
         payload = json.loads(payload_str)
+        return payload, payload_str
     except json.JSONDecodeError:
         logging.error(f"Could not decode JSON payload from topic {topic}: {payload_str}")
-        return
+        return None, None
     except UnicodeDecodeError:
         logging.error(f"Could not decode UTF-8 payload from topic {topic}")
-        return
+        return None, None
     except Exception as e:
         logging.error(f"Error processing message from {topic}: {e}")
+        return None, None
+
+def _handle_control_message_internal(payload):
+    """Handles incoming control messages."""
+    global SESSION_STATE, STATION_STATUS, CONFIG
+    new_session_state, new_station_status, reloaded_config = handle_control_message(payload, SESSION_STATE, STATION_STATUS)
+    SESSION_STATE = new_session_state
+    STATION_STATUS = new_station_status
+    if reloaded_config is not None:
+        CONFIG = reloaded_config # Update the global configuration
+        logging.info("Server configuration has been reloaded.")
+
+def _handle_station_event_internal(topic, payload, client):
+    """Handles incoming station event messages if the session is running."""
+    if SESSION_STATE != SESSION_STATE_RUNNING:
+        logging.debug(f"Ignoring message from {topic} because session state is {SESSION_STATE}")
         return
+    handle_station_event(topic, payload, client, CONFIG, STATION_STATUS, logging)
+
+
+def on_message(client, userdata, msg):
+    topic = msg.topic
+    payload, _ = _parse_message_payload(msg)
+    if payload is None:
+        return # Error already logged in _parse_message_payload
 
     # --- Handle Control Messages ---
-    if topic == "escaperoom/server/control/session":
-        global CONFIG # Allow modification of the global CONFIG
-        new_session_state, new_station_status, reloaded_config = handle_control_message(payload, SESSION_STATE, STATION_STATUS)
-        SESSION_STATE = new_session_state
-        STATION_STATUS = new_station_status
-        if reloaded_config is not None:
-            CONFIG = reloaded_config # Update the global configuration
-            logging.info("Server configuration has been reloaded.")
+    if topic == MQTT_TOPIC_SERVER_CONTROL:
+        _handle_control_message_internal(payload)
         return # Stop processing after handling a control message
 
     # --- Handle Station Event Messages ---
-    if SESSION_STATE != "RUNNING":
-        logging.debug(f"Ignoring message from {topic} because session state is {SESSION_STATE}")
-        return
-
-    handle_station_event(topic, payload, client, CONFIG, STATION_STATUS, logging)
+    # Check if the topic matches the station event pattern (basic check)
+    if topic.startswith("escaperoom/station/"):
+         _handle_station_event_internal(topic, payload, client)
+    else:
+        logging.warning(f"Received message on unhandled topic: {topic}")
 
 
 # --- MQTT Client Setup ---
 def create_mqtt_client():
     broker_host = CONFIG['mqtt_broker']['host']
     broker_port = CONFIG['mqtt_broker']['port']
-    client_id = f"escape-room-server-{os.getpid()}"
-    
+    client_id = f"{MQTT_CLIENT_ID_PREFIX}{os.getpid()}"
+
     client = mqtt.Client(client_id=client_id)
     client.on_connect = on_connect
     client.on_message = on_message
@@ -99,7 +134,7 @@ def create_mqtt_client():
 
     logging.info(f"Attempting to connect to MQTT broker at {broker_host}:{broker_port}")
     try:
-        client.connect(broker_host, broker_port, 60) # 60-second keepalive
+        client.connect(broker_host, broker_port, MQTT_KEEPALIVE_SECONDS)
     except Exception as e:
         logging.error(f"MQTT connection failed: {e}")
         # The loop_start/loop_forever will handle retries
@@ -119,9 +154,8 @@ if __name__ == "__main__":
     # Keep the main thread alive
     try:
         while True:
-            # You could add periodic tasks here if needed
-            # e.g., check session timeout, save state periodically (future)
-            time.sleep(1) 
+            
+            time.sleep(MAIN_LOOP_SLEEP_SECONDS) 
     except KeyboardInterrupt:
         logging.info("Shutting down server...")
     finally:
