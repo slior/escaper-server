@@ -1,4 +1,4 @@
-# MQTT Message Handling Logic (`on_message`)
+ # MQTT Message Handling Logic (`on_message`)
 
 This document describes the logic implemented within the `on_message` callback function in `src/server.py`. This function is the central hub for processing incoming MQTT messages for the escape room server.
 
