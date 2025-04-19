@@ -23,25 +23,6 @@ This project provides a simple MQTT-based server application designed to manage 
     sudo apt update && sudo apt install -y python3-gi gir1.2-gstreamer-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-tools python3-pip python3-venv
     ```
 
-## Directory Structure
-
-```
-.
-├── docs/
-│   ├── spec.md           # Original requirements specification
-│   └── plan.md           # Implementation plan summary
-├── src/
-│   ├── server.py         # Main Python server application
-│   ├── config.json       # Configuration file for the server
-│   ├── requirements.txt  # Python dependencies
-│   └── Dockerfile        # (Optional: For reference or future containerization)
-├── logs/                 # Directory for log files (created automatically by script)
-├── .venv/                # Python virtual environment directory
-├── docker-compose.yml    # Docker Compose configuration (for MQTT broker)
-├── mosquitto.conf        # Configuration for MQTT broker
-└── README.md             # This file
-```
-
 ## Setup
 
 1.  **Clone the Repository:**
@@ -163,16 +144,3 @@ You can test the server by sending MQTT messages using an MQTT client (like `mos
     mosquitto_pub -h localhost -p 1883 -t "escaperoom/server/control/session" -m '{"action": "stop"}'
     ```
 *   Check the server logs for the "Escape Room Session STOPPED" message.
-
-## Adding New Logic
-
-To add logic for new event types or stations:
-
-1.  **Update `config.json`:** Add new entries under `station_configs` for the new station or sensor, specifying its `event_type`, necessary parameters (like thresholds or trigger values), and the `sound_on_trigger` filename (ensure the audio file exists in your designated audio directory).
-2.  **Modify `src/server.py`:**
-    *   In the `on_message` function, find the `# --- Hardcoded Logic based on Config ---` section.
-    *   Add a new `elif event_type == "your_new_event_type":` block.
-    *   Inside this block, add Python code to handle the new event type.
-    *   Remember that `play_audio_threaded(sound_file)` expects just the filename, and it will be joined with the `audio_base_path` from `config.json`.
-
-Restart the Python server script (`Ctrl+C`, then `python server.py`) after making changes to `server.py` or `config.json`. 
