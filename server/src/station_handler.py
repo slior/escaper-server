@@ -2,15 +2,15 @@ import json
 import logging
 
 # --- Import Audio Utils ---
-# Assuming audio_utils is in the same directory or accessible via PYTHONPATH
+# Use relative import because station_handler is part of the 'src' package
 try:
-    from audio_utils import play_audio_threaded
+    from .audio_utils import play_audio_threaded
 except ImportError:
-    # Fallback or error handling if audio_utils is not found directly
-    logging.error("Could not import play_audio_threaded from audio_utils.")
+    # Fallback or error handling if audio_utils is not found
+    logging.exception("Failed to import play_audio_threaded from .audio_utils. Check relative path and file existence.")
     # Define a dummy function or re-raise the error depending on desired behavior
     def play_audio_threaded(sound_file):
-        logging.warning(f"Audio playback skipped for {sound_file} (audio_utils not found).")
+        logging.warning(f"Audio playback skipped for {sound_file} (audio_utils import failed).")
 
 
 def handle_station_event(topic, payload, client, config, station_status, logger):

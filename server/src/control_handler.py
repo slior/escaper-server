@@ -2,7 +2,7 @@ import logging
 import json # Import json for potential error handling
 
 # --- Import Configuration Loading ---
-from config_loader import load_config
+from .config_loader import load_config
 
 # --- Import Audio Utils (Optional, if needed for control actions in the future) ---
 # from audio_utils import play_audio_threaded

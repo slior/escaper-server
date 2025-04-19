@@ -68,12 +68,12 @@ This project provides a simple MQTT-based server application designed to manage 
 ## Running the Server
 
 1.  **Start MQTT Broker:**
-    *   Open a terminal in the project root directory (where `docker-compose.yml` is located).
+    *   Open a terminal in the project root directory (`escape_room_server`).
     *   Run:
         ```bash
         docker-compose up -d mqtt_broker
         ```
-    *   This starts only the Mosquitto broker in the background.
+    *   This starts the Mosquitto broker in the background.
     *   To view broker logs: `docker-compose logs -f mqtt_broker`
 
 2.  **Start Python Server:**
@@ -82,19 +82,19 @@ This project provides a simple MQTT-based server application designed to manage 
         ```bash
         source .venv/bin/activate
         ```
-    *   Navigate to the source directory:
+    *   Navigate to the `server` directory:
         ```bash
-        cd src
+        cd server
         ```
-    *   Run the server script:
+    *   Run the server script **as a module**:
         ```bash
-        python server.py
+        python3 -m src.server
         ```
-    *   The server will connect to `localhost:1883` and start listening. Logs will appear in the console and be written to the file specified in `config.json`.
+    *   The server will connect to `localhost:1883` and start listening. Logs will appear in the console and be written to the file specified in `src/config.json` (relative to the `src` directory).
 
 ## Stopping the Server
 
-1.  **Stop Python Server:** Press `Ctrl+C` in the terminal where `python server.py` is running.
+1.  **Stop Python Server:** Press `Ctrl+C` in the terminal where `python3 -m src.server` is running.
 2.  **Stop MQTT Broker:**
     ```bash
     docker-compose down
@@ -102,6 +102,8 @@ This project provides a simple MQTT-based server application designed to manage 
     *(This stops and removes the `mqtt_broker` container)*
 
 ## Testing
+
+### Manual Testing
 
 You can test the server by sending MQTT messages using an MQTT client (like `mosquitto_pub` command-line tool installed in WSL or a GUI client like MQTT Explorer connected to `localhost:1883`).
 
@@ -144,3 +146,32 @@ You can test the server by sending MQTT messages using an MQTT client (like `mos
     mosquitto_pub -h localhost -p 1883 -t "escaperoom/server/control/session" -m '{"action": "stop"}'
     ```
 *   Check the server logs for the "Escape Room Session STOPPED" message.
+
+### Unit Tests
+
+The project includes unit tests for the server's message handling logic.
+
+1.  **Open a terminal** in the project root directory (`escape_room_server`).
+2.  **Activate the virtual environment:**
+    ```bash
+    source .venv/bin/activate
+    ```
+3.  **Set the PYTHONPATH:** This tells Python where to find the `src` code when running tests from the root.
+    *   Linux/macOS:
+        ```bash
+        export PYTHONPATH=$PYTHONPATH:./server
+        ```
+    *   Windows (Command Prompt):
+        ```bash
+        set PYTHONPATH=%PYTHONPATH%;./server
+        ```
+    *   Windows (PowerShell):
+        ```bash
+        $env:PYTHONPATH += ";./server"
+        ```
+    *   *Note: You need to set this variable in the terminal session where you run the tests.* 
+4.  **Run the tests:**
+    ```bash
+    python3 -m unittest discover server/tests
+    ```
+    *   The test results will be printed to the console.

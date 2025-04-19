@@ -58,3 +58,41 @@ The initial setup involved running both the MQTT broker (Mosquitto) and the Pyth
 *   **Python Server:** Runs directly in the WSL environment using a Python virtual environment.
 *   **Audio Files:** Located on the Windows host (e.g., `C:\tmp\audio`) and accessed by the Python script via the WSL path (`/mnt/c/tmp/audio`).
 *   **Logging:** Log file is created in the `logs` directory at the project root on the host filesystem. 
+
+## Unit Testing Plan
+
+To ensure the reliability of the server's message handling logic, unit tests will be implemented.
+
+*   **Objective:** Verify the correct processing of MQTT control messages and station event messages by the `on_message` function and its helpers in `src/server.py`, based on the logic documented in `message_handling.md`.
+*   **Framework:** Python's built-in `unittest` module and `unittest.mock` for mocking dependencies.
+*   **Directory Structure:** Tests will reside in a dedicated directory:
+    ```
+    server/
+    ├── src/
+    ├── docs/
+    └── tests/
+        ├── __init__.py
+        └── test_server_message_handling.py
+    ```
+*   **Running Tests:**
+    1.  Navigate to the project root (`escape_room_server`).
+    2.  Set the `PYTHONPATH` environment variable to include the `server` directory:
+        *   Linux/macOS: `export PYTHONPATH=$PYTHONPATH:./server`
+        *   Windows (CMD): `set PYTHONPATH=%PYTHONPATH%;./server`
+        *   Windows (PS): `$env:PYTHONPATH += ";./server"`
+    3.  Run the tests using: `python -m unittest discover server/tests`
+*   **Key Areas to Test (`server/tests/test_server_message_handling.py`):**
+    *   **Message Parsing:** Valid JSON, invalid JSON, non-UTF-8 payload.
+    *   **Control Messages (`_handle_control_message_internal` via `on_message`):**
+        *   `start` action (initial and subsequent).
+        *   `stop` action.
+        *   `reset` action.
+        *   `reload` config action.
+        *   Unknown actions.
+        *   Verify state changes (`SESSION_STATE`, `STATION_STATUS`) and calls to `handle_control_message`.
+    *   **Station Events (`_handle_station_event_internal` via `on_message`):**
+        *   Events ignored when session is not "RUNNING".
+        *   Valid events call `handle_station_event` with correct arguments.
+        *   Events with invalid topic format.
+    *   **`on_message` Routing:** Ensure correct internal handler (`_handle_control_message_internal` or `_handle_station_event_internal`) is called based on the topic. Test unhandled topics.
+    *   **Mocking:** External dependencies (MQTT client, `handle_station_event`, `handle_control_message`, `play_audio_threaded`, config loading, logging) will be mocked using `unittest.mock.patch`. Global state (`SESSION_STATE`, `STATION_STATUS`, `CONFIG`) will be managed or patched within tests. 

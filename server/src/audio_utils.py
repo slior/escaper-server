@@ -2,7 +2,7 @@ import os
 import threading
 import logging
 from playsound import playsound, PlaysoundException
-from config_loader import load_config
+from .config_loader import load_config
 
 # Load configuration specifically for audio settings
 # Assuming config.json is in the root relative to where server.py is run

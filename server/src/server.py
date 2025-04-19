@@ -7,15 +7,15 @@ import time
 
 
 # --- Import Configuration Loading ---
-from config_loader import load_config
+from .config_loader import load_config
 # --- Import Logging Setup ---
-from logging_utils import setup_logging
+from .logging_utils import setup_logging
 # --- Import Audio Utils ---
-from audio_utils import play_audio_threaded
+from .audio_utils import play_audio_threaded
 # --- Import Station Handler ---
-from station_handler import handle_station_event
+from .station_handler import handle_station_event
 # --- Import Control Handler ---
-from control_handler import handle_control_message
+from .control_handler import handle_control_message
 
 # --- Constants ---
 # Session States
@@ -105,16 +105,27 @@ def on_message(client, userdata, msg):
     if payload is None:
         return # Error already logged in _parse_message_payload
 
-    # --- Handle Control Messages ---
+    # --- Handle Control Messages FIRST ---
     if topic == MQTT_TOPIC_SERVER_CONTROL:
         _handle_control_message_internal(payload)
         return # Stop processing after handling a control message
 
     # --- Handle Station Event Messages ---
-    # Check if the topic matches the station event pattern (basic check)
-    if topic.startswith("escaperoom/station/"):
+    # Check if the topic looks like a valid station event
+    topic_parts = topic.split('/')
+    # Expected structure: escaperoom/station/<station_id>/event/<event_type>
+    # Check: starts with prefix, has enough parts, and 'event' is in the right place
+    is_station_event_topic = (
+        topic.startswith("escaperoom/station/") and
+        len(topic_parts) >= 5 and
+        topic_parts[3] == "event"
+    )
+
+    if is_station_event_topic:
          _handle_station_event_internal(topic, payload, client)
     else:
+        # This catches topics that didn't match control and don't look like valid station events
+        # (e.g., "escaperoom/station/malformed", "other/topic")
         logging.warning(f"Received message on unhandled topic: {topic}")
 
 
