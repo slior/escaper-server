@@ -61,16 +61,17 @@ sequenceDiagram
                 Server->>Server: Log "Message will be handled by..."
                 Server->>Handler: Call handle(topic, payload, client, current_server_state)
                 Handler->>Handler: Execute specific logic (e.g., check action, check sensors)
-                opt State Modification Needed
+                alt State Modification Needed
                     Handler->>ServerStateObj: Create next_server_state (with changes)
+                    Handler-->>Server: Return next_server_state
                 else No State Modification
                     Handler-->>Server: Return original current_server_state
                 end
-                Handler-->>Server: Return next_server_state
+                
                 Server->>Server: Compare current_server_state is next_server_state
-                alt State Object Changed (is not)
+                alt State Object Changed
                     Server->>State: Update Globals from next_server_state
-                else State Object Unchanged (is)
+                else State Object Unchanged
                      Server->>Server: Log "Handler processed but did not change state"
                 end
                 Server->>Handlers: break loop
@@ -83,7 +84,6 @@ sequenceDiagram
         end
         Server-->>Broker: Ack (implicitly)
     end
-
 ```
 
 ## State Management
