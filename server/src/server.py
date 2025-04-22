@@ -2,30 +2,21 @@ import paho.mqtt.client as mqtt
 import json
 import logging
 import os
-import threading
+# import threading
 import time
 
 
-# --- Import Configuration Loading ---
 from .config_loader import load_config
-# --- Import Logging Setup ---
 from .logging_utils import setup_logging
-# --- Import Audio Utils ---
-from .audio_utils import play_audio_threaded
-# --- Import Station Handler ---
-from .station_handler import handle_station_event
-# --- Import Control Handler ---
-from .control_handler import handle_control_message
+from .server_state import ServerState
+from .control_handler import ControlMessageHandler
+from .station_handler import StationEventHandler
+from .constants import ( # Import necessary constants
+    SESSION_STATE_PENDING,
+    MQTT_TOPIC_SERVER_CONTROL, MQTT_TOPIC_STATION_BASE
+)
 
-# --- Constants ---
-# Session States
-SESSION_STATE_PENDING = "PENDING"
-SESSION_STATE_RUNNING = "RUNNING"
-SESSION_STATE_STOPPED = "STOPPED"
 
-# MQTT Topics
-MQTT_TOPIC_STATION_EVENTS = "escaperoom/station/+/event/+"
-MQTT_TOPIC_SERVER_CONTROL = "escaperoom/server/control/session"
 
 # MQTT Configuration
 MQTT_CLIENT_ID_PREFIX = "escape-room-server-"
@@ -35,25 +26,31 @@ MQTT_KEEPALIVE_SECONDS = 60
 MAIN_LOOP_SLEEP_SECONDS = 1
 DEFAULT_LOG_FILE = '/app/logs/server.log' # used if not in config
 
-# --- Configuration Loading ---
 CONFIG = load_config()
 
 # --- Logging Setup ---
 LOG_FILE = CONFIG.get('log_file', DEFAULT_LOG_FILE)
 setup_logging(LOG_FILE)
+# Ensure setup_logging configures the root logger used by logging.info etc.
+# Or get a specific logger: logger = logging.getLogger(__name__)
 
 # --- State Management (In-Memory) ---
 SESSION_STATE = SESSION_STATE_PENDING # Initial state
 STATION_STATUS = {} # e.g., {"station_5": {"completed": false}, "station_door": {"completed": false}}
+
+# --- Instantiate Handlers ---
+# Placed here so they are globally accessible if needed, or before on_message
+message_handlers = [ControlMessageHandler(), StationEventHandler()]
 
 # --- MQTT Callbacks ---
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         logging.info("Connected to MQTT Broker!")
         # Subscribe to topics upon successful connection
-        client.subscribe(MQTT_TOPIC_STATION_EVENTS)
         client.subscribe(MQTT_TOPIC_SERVER_CONTROL)
-        logging.info(f"Subscribed to: {MQTT_TOPIC_STATION_EVENTS} and {MQTT_TOPIC_SERVER_CONTROL}")
+        station_wildcard_topic = f"{MQTT_TOPIC_STATION_BASE}+/event/+" # Matches escaperoom/station/<id>/event/<type>
+        client.subscribe(station_wildcard_topic)
+        logging.info(f"Subscribed to: {MQTT_TOPIC_SERVER_CONTROL} and {station_wildcard_topic}")
     else:
         logging.error(f"Failed to connect, return code {rc}")
 
@@ -81,52 +78,57 @@ def _parse_message_payload(msg):
         logging.error(f"Error processing message from {topic}: {e}")
         return None, None
 
-def _handle_control_message_internal(payload):
-    """Handles incoming control messages."""
-    global SESSION_STATE, STATION_STATUS, CONFIG
-    new_session_state, new_station_status, reloaded_config = handle_control_message(payload, SESSION_STATE, STATION_STATUS)
-    SESSION_STATE = new_session_state
-    STATION_STATUS = new_station_status
-    if reloaded_config is not None:
-        CONFIG = reloaded_config # Update the global configuration
-        logging.info("Server configuration has been reloaded.")
-
-def _handle_station_event_internal(topic, payload, client):
-    """Handles incoming station event messages if the session is running."""
-    if SESSION_STATE != SESSION_STATE_RUNNING:
-        logging.debug(f"Ignoring message from {topic} because session state is {SESSION_STATE}")
-        return
-    handle_station_event(topic, payload, client, CONFIG, STATION_STATUS, logging)
-
-
 def on_message(client, userdata, msg):
+    # Make state variables accessible for update
+    global SESSION_STATE, STATION_STATUS, CONFIG
+
+    logging.debug(f"Received message: {msg.topic} - {msg.payload}")
     topic = msg.topic
-    payload, _ = _parse_message_payload(msg)
+    payload, payload_str = _parse_message_payload(msg) # Keep payload_str for logging if needed
     if payload is None:
+        logging.debug(f"Ignoring message on topic {topic} due to parsing error.")
         return # Error already logged in _parse_message_payload
 
-    # --- Handle Control Messages FIRST ---
-    if topic == MQTT_TOPIC_SERVER_CONTROL:
-        _handle_control_message_internal(payload)
-        return # Stop processing after handling a control message
-
-    # --- Handle Station Event Messages ---
-    # Check if the topic looks like a valid station event
-    topic_parts = topic.split('/')
-    # Expected structure: escaperoom/station/<station_id>/event/<event_type>
-    # Check: starts with prefix, has enough parts, and 'event' is in the right place
-    is_station_event_topic = (
-        topic.startswith("escaperoom/station/") and
-        len(topic_parts) >= 5 and
-        topic_parts[3] == "event"
+    # Create current state object
+    # Pass the logging module, assuming setup_logging configured the root logger
+    current_server_state = ServerState(
+        session_state=SESSION_STATE,
+        station_status=STATION_STATUS,
+        config=CONFIG,
+        logger=logging # Pass the configured logging module/logger
     )
 
-    if is_station_event_topic:
-         _handle_station_event_internal(topic, payload, client)
-    else:
-        # This catches topics that didn't match control and don't look like valid station events
-        # (e.g., "escaperoom/station/malformed", "other/topic")
-        logging.warning(f"Received message on unhandled topic: {topic}")
+    message_handled = False
+    for handler in message_handlers:
+        try: # Add try-except around handler calls for robustness
+            if handler.can_handle(topic, payload, current_server_state):
+                logging.debug(f"Message on topic '{topic}' will be handled by {type(handler).__name__}")
+                # Handle the message and get the potentially updated state
+                next_server_state = handler.handle(topic, payload, client, current_server_state)
+
+                # Check if the state object reference changed. If so, update globals.
+                # This relies on handlers returning the *original* object if no changes occurred.
+                if next_server_state is not current_server_state:
+                    logging.debug(f"State updated by {type(handler).__name__}. Updating global state.")
+                    SESSION_STATE = next_server_state.session_state
+                    STATION_STATUS = next_server_state.station_status
+                    CONFIG = next_server_state.config # Update global config if handler changed it
+                else:
+                    logging.debug(f"Handler {type(handler).__name__} processed message but did not change state.")
+
+
+                message_handled = True
+                break # Stop after the first handler processes the message
+        except Exception as e:
+            logging.exception(f"Error during handling message on topic {topic} by {type(handler).__name__}: {e}")
+            # Decide if we should continue trying other handlers or stop. Stopping for now.
+            message_handled = True # Mark as handled to prevent "unhandled" log, error logged instead
+            break
+
+
+    # Log if no handler processed the message
+    if not message_handled:
+        logging.warning(f"Received message on unhandled topic: {topic} or no handler found - Payload: {payload_str}")
 
 
 # --- MQTT Client Setup ---

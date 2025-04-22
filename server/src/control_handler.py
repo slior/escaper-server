@@ -1,25 +1,22 @@
 import logging
 import json # Import json for potential error handling
+from typing import Dict, Any, Optional, Tuple 
+import paho.mqtt.client as mqtt 
 
-# --- Import Configuration Loading ---
 from .config_loader import load_config
+from .constants import (
+    ACTION_START, ACTION_STOP, ACTION_RESET, ACTION_RELOAD_CONFIG,
+    SESSION_STATE_RUNNING, SESSION_STATE_STOPPED, SESSION_STATE_PENDING,
+    MQTT_TOPIC_SERVER_CONTROL
+)
 
-# --- Import Audio Utils (Optional, if needed for control actions in the future) ---
-# from audio_utils import play_audio_threaded
 
-# --- Constants ---
-ACTION_START = "start"
-ACTION_STOP = "stop"
-ACTION_RESET = "reset"
-ACTION_RELOAD_CONFIG = "reload_config"
-
-SESSION_STATE_RUNNING = "RUNNING"
-SESSION_STATE_STOPPED = "STOPPED"
-SESSION_STATE_PENDING = "PENDING"
+from .message_handler_interface import MessageHandler
+from .server_state import ServerState
 
 # --- Helper Functions ---
 
-def _handle_start(current_session_state, current_station_status):
+def _handle_start(current_session_state: str, current_station_status: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """Handles the 'start' action."""
     if current_session_state != SESSION_STATE_RUNNING:
         new_session_state = SESSION_STATE_RUNNING
@@ -33,19 +30,17 @@ def _handle_start(current_session_state, current_station_status):
         new_station_status = current_station_status # No change if already running
     return new_session_state, new_station_status
 
-def _handle_stop():
+def _handle_stop() -> Tuple[str, Dict[str, Any]]:
     """Handles the 'stop' action."""
     logging.info("Escape Room Session STOPPED")
-    # Optionally play a session end sound
-    # play_audio_threaded("session_end.wav")
-    return SESSION_STATE_STOPPED, {} # Return stopped state and empty status
+    return SESSION_STATE_STOPPED, {}
 
-def _handle_reset():
+def _handle_reset() -> Tuple[str, Dict[str, Any]]:
     """Handles the 'reset' action."""
     logging.info("Escape Room Session RESET to PENDING state")
-    return SESSION_STATE_PENDING, {} # Return pending state and empty status
+    return SESSION_STATE_PENDING, {}
 
-def _handle_reload_config(current_session_state):
+def _handle_reload_config(current_session_state: str) -> Optional[Dict[str, Any]]:
     """Handles the 'reload_config' action."""
     reloaded_config = None
     if current_session_state == SESSION_STATE_RUNNING:
@@ -55,8 +50,7 @@ def _handle_reload_config(current_session_state):
             reloaded_config = load_config()
             logging.info("Configuration successfully reloaded.")
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            # Log the error, but don't crash the server
-            logging.error(f"Failed to reload configuration: {e}")
+            logging.error(f"Failed to reload configuration: {e}") # Log the error, but don't crash the server
             # reloaded_config remains None
         except Exception as e:
             logging.error(f"An unexpected error occurred during configuration reload: {e}")
@@ -66,43 +60,66 @@ def _handle_reload_config(current_session_state):
     return reloaded_config
 
 
-# --- Main Handler ---
+# --- New Message Handler Class ---
 
-def handle_control_message(payload, current_session_state, current_station_status):
-    """
-    Handles incoming MQTT messages for server control actions.
+class ControlMessageHandler(MessageHandler):
+    """Handles control messages directed to the server."""
 
-    Args:
-        payload (dict): The decoded JSON payload of the message.
-        current_session_state (str): The current session state.
-        current_station_status (dict): The current station status dictionary.
+    def can_handle(self, topic: str, payload: Dict[str, Any], server_state: ServerState) -> bool:
+        """Checks if the message is on the server control topic."""
+        return topic == MQTT_TOPIC_SERVER_CONTROL
 
-    Returns:
-        tuple: A tuple containing the updated session_state (str),
-               updated station_status (dict), and potentially the
-               reloaded configuration (dict or None).
-    """
-    action = payload.get("action")
-    new_session_state = current_session_state
-    new_station_status = current_station_status.copy() # Work on a copy
-    reloaded_config = None # Default to no config change
+    def handle(self, topic: str, payload: Dict[str, Any], client: mqtt.Client, server_state: ServerState) -> ServerState:
+        """Handles the control action specified in the payload."""
+        action = payload.get("action")
+        original_state = server_state # Keep reference for comparison/logging/immutability check
 
-    if action == ACTION_START:
-        new_session_state, new_station_status = _handle_start(current_session_state, new_station_status)
-    elif action == ACTION_STOP:
-        new_session_state, new_station_status = _handle_stop()
-    elif action == ACTION_RESET:
-        new_session_state, new_station_status = _handle_reset()
-    elif action == ACTION_RELOAD_CONFIG:
-        # Reload config only affects the config, not state/status directly here
-        reloaded_config = _handle_reload_config(current_session_state)
-        # Keep current state and status unless changed by other logic (not the case here)
-        new_session_state = current_session_state
-        new_station_status = current_station_status
-    else:
-        logging.warning(f"Unknown control action received: {action}")
-        # Keep current state and status if action is unknown
-        new_session_state = current_session_state
-        new_station_status = current_station_status
+        # Start with values from the current state
+        new_session_state = server_state.session_state
+        new_station_status = server_state.station_status
+        new_config = server_state.config
+        state_changed = False # Flag to track if a new state object is needed
 
-    return new_session_state, new_station_status, reloaded_config # Return the potentially reloaded config 
+        if action == ACTION_START:
+            calculated_session_state, calculated_station_status = _handle_start(server_state.session_state, server_state.station_status)
+            if calculated_session_state != new_session_state or calculated_station_status != new_station_status:
+                new_session_state = calculated_session_state
+                new_station_status = calculated_station_status
+                state_changed = True
+        elif action == ACTION_STOP:
+            calculated_session_state, calculated_station_status = _handle_stop()
+            if calculated_session_state != new_session_state or calculated_station_status != new_station_status:
+                new_session_state = calculated_session_state
+                new_station_status = calculated_station_status
+                state_changed = True
+        elif action == ACTION_RESET:
+            calculated_session_state, calculated_station_status = _handle_reset()
+            if calculated_session_state != new_session_state or calculated_station_status != new_station_status:
+                new_session_state = calculated_session_state
+                new_station_status = calculated_station_status
+                state_changed = True
+        elif action == ACTION_RELOAD_CONFIG:
+            reloaded_config_result = _handle_reload_config(server_state.session_state)
+            
+            if reloaded_config_result is not None and reloaded_config_result is not new_config:
+                new_config = reloaded_config_result
+                state_changed = True
+            # Session state and station status remain unchanged for reload_config
+        else:
+            server_state.logger.warning(f"Unknown control action received: {action}")
+            # No state change for unknown actions
+            return original_state
+
+        # Create and return a new state instance ONLY if something changed
+        if state_changed:
+            server_state.logger.debug(f"Control action '{action}' resulted in state change. Creating new ServerState.")
+            return ServerState(
+                session_state=new_session_state,
+                station_status=new_station_status,
+                config=new_config,
+                logger=server_state.logger # Reuse the logger from the original state
+            )
+        else:
+            server_state.logger.debug(f"Control action '{action}' did not result in state change. Returning original ServerState.")
+            return original_state
+
